@@ -1,6 +1,6 @@
-IMG ?= cpu-shrink-controller:latest
+IMG ?= ghcr.io/jvillalbaj2lc/k8-hot-shrunk-requests:latest
 
-.PHONY: fmt vet test build run docker-build
+.PHONY: fmt vet test build run docker-build docker-push
 
 fmt:
 	go fmt ./...
@@ -19,3 +19,6 @@ run:
 
 docker-build:
 	docker build -t $(IMG) .
+
+docker-push:
+	docker push $(IMG)

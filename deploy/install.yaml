@@ -57,7 +57,8 @@ spec:
       serviceAccountName: cpu-shrink-controller
       containers:
         - name: manager
-          image: cpu-shrink-controller:latest
+          # Replace :latest with a specific tag (e.g. :v0.1.0) for production use
+          image: ghcr.io/jvillalbaj2lc/k8-hot-shrunk-requests:latest
           args:
             - --health-probe-bind-address=:8081
           ports:

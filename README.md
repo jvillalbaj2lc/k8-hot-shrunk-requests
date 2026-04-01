@@ -6,6 +6,28 @@ A lightweight Kubernetes controller that performs a **one-time in-place CPU requ
 
 Some workloads need extra CPU during startup (JVM warm-up, cache loading, etc.) but require far less at steady state. This controller watches opted-in Pods and automatically reduces the CPU request once the container has started, freeing up cluster resources without disrupting the application.
 
+## Container Image
+
+The controller image is automatically built and published to GitHub Container Registry (GHCR) by GitHub Actions on every push to `main` and on version tags.
+
+**Image:** `ghcr.io/jvillalbaj2lc/k8-hot-shrunk-requests`
+
+### Pull the image
+
+```bash
+docker pull ghcr.io/jvillalbaj2lc/k8-hot-shrunk-requests:latest
+```
+
+### Available tags
+
+| Tag | Description |
+|---|---|
+| `latest` | Latest build from `main` branch |
+| `v0.1.0` | Specific release version |
+| `sha-abc1234` | Specific commit SHA |
+
+> **Note:** The first time the image is published, you may need to change the package visibility to **Public** in the [GitHub package settings](https://github.com/jvillalbaj2lc/k8-hot-shrunk-requests/pkgs/container/k8-hot-shrunk-requests/settings).
+
 ## How It Works
 
 1. The controller watches all Pods in the cluster.
@@ -45,7 +67,7 @@ The controller requires these RBAC permissions:
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Access to a Kubernetes cluster (e.g. kind, minikube) with `InPlacePodVerticalScaling` feature gate enabled
 - `kubectl` configured
 
@@ -66,16 +88,40 @@ make fmt
 make vet
 ```
 
-### Deploy to Cluster
+### Build and Push Image Manually
 
 ```bash
 # Build the image
+make docker-build
+
+# Push to GHCR (requires: docker login ghcr.io)
+make docker-push
+
+# Build with a custom tag
+make docker-build IMG=ghcr.io/jvillalbaj2lc/k8-hot-shrunk-requests:v0.1.0
+make docker-push IMG=ghcr.io/jvillalbaj2lc/k8-hot-shrunk-requests:v0.1.0
+```
+
+## Deploy to Cluster
+
+### Using the GHCR image (recommended)
+
+```bash
+kubectl apply -f deploy/install.yaml
+```
+
+### Using kustomize with a pinned version
+
+```bash
+# Edit deploy/kustomization.yaml to set the desired tag, then:
+kubectl apply -k deploy/
+```
+
+### Local development with kind
+
+```bash
 make docker-build IMG=cpu-shrink-controller:latest
-
-# Load into kind (if using kind)
 kind load docker-image cpu-shrink-controller:latest
-
-# Deploy
 kubectl apply -f deploy/install.yaml
 ```
 
@@ -98,6 +144,24 @@ kubectl get pod example-app -o jsonpath='{.spec.containers[0].resources.requests
 kubectl get pod example-app -o jsonpath='{.metadata.annotations.autosize\.k8s\.io/cpu-request-shrunk}'
 # Expected: true
 ```
+
+## Creating a Release
+
+To publish a versioned image:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+This triggers the publish workflow and creates image tags `v0.1.0`, `0.1`, and `sha-<commit>`.
+
+## CI/CD
+
+| Workflow | File | Triggers | Purpose |
+|---|---|---|---|
+| **CI** | `.github/workflows/ci.yml` | Push/PR to `main` | Runs vet, fmt check, and tests |
+| **Publish Image** | `.github/workflows/publish.yml` | Push to `main`, version tags, manual | Builds and pushes multi-arch image to GHCR |
 
 ## Example Pod Spec
 

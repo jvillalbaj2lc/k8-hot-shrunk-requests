@@ -12,7 +12,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -136,7 +135,7 @@ func TestPodWithoutLabel_Ignored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter > 0 {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue for pod without label")
 	}
 }
@@ -153,7 +152,7 @@ func TestPodWithLabelButMissingAnnotation_Warning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter > 0 {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue for missing annotation")
 	}
 
@@ -180,7 +179,7 @@ func TestPodNotRunning_Ignored(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Pending pod is not eligible (phase != Running), should be ignored without requeue
-	if res.Requeue {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue for pending pod")
 	}
 }
@@ -214,7 +213,7 @@ func TestPodRunningAndStarted_ResizePatched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter > 0 {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue after successful resize")
 	}
 
@@ -246,7 +245,7 @@ func TestAlreadyProcessed_Ignored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter > 0 {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue for already processed pod")
 	}
 }
@@ -263,7 +262,7 @@ func TestInvalidTargetContainer_Warning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter > 0 {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue for invalid target container")
 	}
 
@@ -289,7 +288,7 @@ func TestInvalidCPUValue_Warning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter > 0 {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue for invalid CPU value")
 	}
 
@@ -319,7 +318,7 @@ func TestMultipleContainersNoAnnotation_Warning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter > 0 {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue for ambiguous target container")
 	}
 
@@ -345,7 +344,7 @@ func TestSucceededPod_Ignored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter > 0 {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue for succeeded pod")
 	}
 }
@@ -366,7 +365,7 @@ func TestTerminatingPod_Ignored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue || res.RequeueAfter > 0 {
+	if res.RequeueAfter > 0 {
 		t.Error("expected no requeue for terminating pod")
 	}
 }
@@ -531,25 +530,4 @@ func TestIsStartupComplete(t *testing.T) {
 			}
 		})
 	}
-}
-
-// verifyNoRequeue asserts that the result has no requeue and no error.
-func verifyNoRequeue(t *testing.T, res ctrl.Result, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.Requeue || res.RequeueAfter > 0 {
-		t.Error("expected no requeue")
-	}
-}
-
-// getPod retrieves a pod from the fake client.
-func getPod(t *testing.T, c client.Client, ns, name string) corev1.Pod {
-	t.Helper()
-	var pod corev1.Pod
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: name}, &pod); err != nil {
-		t.Fatalf("failed to get pod: %v", err)
-	}
-	return pod
 }

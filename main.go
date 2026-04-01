@@ -47,7 +47,7 @@ func main() {
 	if err := (&controller.PodResizeReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("cpu-shrink-controller"),
+		Recorder: mgr.GetEventRecorderFor("cpu-shrink-controller"), //nolint:staticcheck // TODO: migrate to GetEventRecorder (new events API)
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PodResize")
 		os.Exit(1)

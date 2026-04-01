@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
+// Constants for labels and annotations used by the PodResize controller.
 const (
 	LabelShrinkCPU            = "autosize.k8s.io/shrink-cpu-request"
 	AnnotationFinalCPU        = "autosize.k8s.io/final-cpu-request"
@@ -36,6 +37,7 @@ type PodResizeReconciler struct {
 	Recorder record.EventRecorder
 }
 
+// Reconcile processes a single Pod event and performs in-place CPU request shrink if eligible.
 func (r *PodResizeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -179,6 +181,7 @@ func isStartupComplete(pod *corev1.Pod, containerName string) bool {
 	return false
 }
 
+// SetupWithManager registers the controller with the manager.
 func (r *PodResizeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).

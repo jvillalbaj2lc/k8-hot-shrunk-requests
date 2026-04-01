@@ -1,0 +1,30 @@
+# Example Pod that opts into CPU request shrinking.
+#
+# This Pod starts with a generous CPU request (500m) to ensure fast startup,
+# and the controller will shrink it to 50m once the container has started.
+#
+# QoS class: Burstable (requests != limits), which allows in-place resize.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-app
+  labels:
+    autosize.k8s.io/shrink-cpu-request: "true"
+  annotations:
+    autosize.k8s.io/final-cpu-request: "50m"
+    autosize.k8s.io/target-container: "app"
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c", "echo started && sleep 3600"]
+      resources:
+        requests:
+          cpu: 500m
+          memory: 64Mi
+        limits:
+          cpu: "1"
+          memory: 128Mi
+      resizePolicy:
+        - resourceName: cpu
+          restartPolicy: NotRequired

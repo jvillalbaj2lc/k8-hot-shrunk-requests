@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cpu-shrink-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cpu-shrink-controller
+  namespace: cpu-shrink-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cpu-shrink-controller
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods/resize"]
+    verbs: ["patch", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cpu-shrink-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cpu-shrink-controller
+subjects:
+  - kind: ServiceAccount
+    name: cpu-shrink-controller
+    namespace: cpu-shrink-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cpu-shrink-controller
+  namespace: cpu-shrink-system
+  labels:
+    app: cpu-shrink-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cpu-shrink-controller
+  template:
+    metadata:
+      labels:
+        app: cpu-shrink-controller
+    spec:
+      serviceAccountName: cpu-shrink-controller
+      containers:
+        - name: manager
+          image: cpu-shrink-controller:latest
+          args:
+            - --health-probe-bind-address=:8081
+          ports:
+            - containerPort: 8081
+              name: healthz
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: healthz
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL

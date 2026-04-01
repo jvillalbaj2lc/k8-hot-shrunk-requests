@@ -1,5 +1,8 @@
 # CPU Request Shrink Controller
 
+[![CI](https://github.com/jvillalbaj2lc/k8-hot-shrunk-requests/actions/workflows/ci.yml/badge.svg)](https://github.com/jvillalbaj2lc/k8-hot-shrunk-requests/actions/workflows/ci.yml)
+[![Publish Image](https://github.com/jvillalbaj2lc/k8-hot-shrunk-requests/actions/workflows/publish.yml/badge.svg)](https://github.com/jvillalbaj2lc/k8-hot-shrunk-requests/actions/workflows/publish.yml)
+
 A lightweight Kubernetes controller that performs a **one-time in-place CPU request shrink** on Pods after their startup is complete — without recreating the Pod.
 
 ## Purpose

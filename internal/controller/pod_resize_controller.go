@@ -263,8 +263,8 @@ func shouldShrinkNow(pod *corev1.Pod, containerName, mode string) bool {
 // containerConditionAge returns how long ago the container condition was met.
 // For "started" mode it uses the container's started-at time; for "ready" it
 // uses the ContainersReady pod condition transition time.
-// If the time cannot be determined, returns 0 (so the delay is considered not elapsed yet on first pass,
-// but the controller will requeue and the time will eventually be resolvable or the delay will be skipped).
+// If the time cannot be determined, returns 0 (so the delay is considered not elapsed yet
+// and the controller will requeue until the time becomes resolvable).
 func containerConditionAge(pod *corev1.Pod, containerName, mode string) time.Duration {
 	now := time.Now()
 

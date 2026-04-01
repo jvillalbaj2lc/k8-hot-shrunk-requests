@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -18,6 +20,31 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Verify Kubernetes 1.35+ library compatibility
+        run: |
+          echo "=== Go version ==="
+          go version
+          echo ""
+          echo "=== Kubernetes library versions ==="
+          K8S_API=$(go list -m -f '{{.Version}}' k8s.io/api)
+          K8S_APIMACHINERY=$(go list -m -f '{{.Version}}' k8s.io/apimachinery)
+          K8S_CLIENT=$(go list -m -f '{{.Version}}' k8s.io/client-go)
+          CR_VERSION=$(go list -m -f '{{.Version}}' sigs.k8s.io/controller-runtime)
+          echo "k8s.io/api:            $K8S_API"
+          echo "k8s.io/apimachinery:   $K8S_APIMACHINERY"
+          echo "k8s.io/client-go:      $K8S_CLIENT"
+          echo "controller-runtime:    $CR_VERSION"
+          echo ""
+          # k8s.io/api v0.X.Y maps to Kubernetes 1.X
+          # Verify the minor version is 35 or higher (k8s 1.35+)
+          MINOR=$(echo "$K8S_API" | sed -E 's/^v0\.([0-9]+)\..*/\1/')
+          echo "Detected Kubernetes API version: 1.${MINOR} (from k8s.io/api ${K8S_API})"
+          if [ "$MINOR" -lt 35 ]; then
+            echo "ERROR: k8s.io/api must be v0.35+ for Kubernetes 1.35+ compatibility"
+            exit 1
+          fi
+          echo "✓ Kubernetes 1.35+ library compatibility confirmed"
 
       - name: Verify formatting
         run: |

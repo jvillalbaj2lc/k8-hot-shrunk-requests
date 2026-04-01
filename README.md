@@ -36,19 +36,66 @@ docker pull ghcr.io/jvillalbaj2lc/k8-hot-shrunk-requests:latest
 1. The controller watches all Pods in the cluster.
 2. It only acts on Pods that have the opt-in label `autosize.k8s.io/shrink-cpu-request: "true"`.
 3. It reads the desired final CPU request from annotation `autosize.k8s.io/final-cpu-request`.
-4. It waits until the Pod is `Running` and the target container has `started == true`.
-5. It patches the Pod using the **`/resize` subresource** to reduce only `resources.requests.cpu`.
-6. It marks the Pod as processed with annotation `autosize.k8s.io/cpu-request-shrunk: "true"`.
-7. Everything else (CPU limit, memory request, memory limit) remains unchanged.
+4. It waits until the Pod is `Running` and the trigger condition is met (container started or ready, depending on the configured shrink mode).
+5. If an optional startup delay is configured, it waits that additional duration after the trigger condition is met.
+6. It verifies the final CPU request is **strictly lower** than the current CPU request (never upscales).
+7. It patches the Pod using the **`/resize` subresource** to reduce only `resources.requests.cpu`.
+8. It confirms the resize was applied, then marks the Pod as processed with annotation `autosize.k8s.io/cpu-request-shrunk: "true"`.
+9. Everything else (CPU limit, memory request, memory limit) remains unchanged.
 
 ## Labels and Annotations
 
 | Key | Type | Required | Description |
 |---|---|---|---|
 | `autosize.k8s.io/shrink-cpu-request` | Label | **Yes** | Must be `"true"` to opt in |
-| `autosize.k8s.io/final-cpu-request` | Annotation | **Yes** | Target CPU request value (e.g. `50m`) |
-| `autosize.k8s.io/target-container` | Annotation | No | Container name to resize. If absent, uses the only container in the Pod |
+| `autosize.k8s.io/final-cpu-request` | Annotation | **Yes** | Target CPU request value (e.g. `50m`). Must be lower than current. |
+| `autosize.k8s.io/target-container` | Annotation | No | Container name to resize. Required if Pod has multiple containers. |
+| `autosize.k8s.io/shrink-mode` | Annotation | No | `"started"` (default) or `"ready"`. See [Shrink Modes](#shrink-modes). |
+| `autosize.k8s.io/startup-delay` | Annotation | No | Duration to wait after trigger condition (e.g. `"30s"`). See [Startup Delay](#startup-delay). |
 | `autosize.k8s.io/cpu-request-shrunk` | Annotation | — | Set by controller after successful resize |
+
+### Shrink Modes
+
+| Mode | Trigger | Use Case |
+|---|---|---|
+| `started` (default) | Container has `started == true` | Most workloads — shrink as soon as the process is running |
+| `ready` | Container has `ready == true` | JVM warm-up, cache priming — wait until readiness probe passes |
+
+If the annotation is missing, the controller defaults to `started`. If the value is invalid, the Pod is skipped with a warning event.
+
+### Startup Delay
+
+If `autosize.k8s.io/startup-delay` is set (e.g. `"30s"`), the controller waits that duration **after** the trigger condition is met before shrinking. This is useful for workloads that need a stabilization period.
+
+If the value is invalid or negative, the Pod is skipped with a warning event.
+
+### True Shrink Semantics
+
+The controller **only shrinks** CPU requests — it never increases them:
+
+- If the final CPU equals the current CPU → skipped (no-op)
+- If the final CPU is greater than the current CPU → refused with a warning event
+- Only when the final CPU is strictly lower → resize is applied
+
+### Common Skip Reasons
+
+A Pod may be skipped if:
+
+- Invalid or unrecognized `shrink-mode` value
+- Invalid `startup-delay` value
+- Missing or invalid `final-cpu-request`
+- Final CPU is not lower than current CPU
+- Target container not found in Pod spec
+- Multiple containers and no `target-container` annotation
+- Current CPU request is missing on the target container
+- Container not yet started / not yet ready (requeued, not skipped)
+
+### Important Limitations
+
+- **Pod QoS class must remain valid** — shrinking CPU requests can change Pod QoS class (e.g. from Guaranteed to Burstable). Ensure your final CPU values maintain the desired QoS class.
+- **Kubernetes 1.35+ recommended** — requires the `InPlacePodVerticalScaling` feature gate.
+- **CPU only** — memory resizing is not supported.
+- **Single resize** — the controller only shrinks once per Pod lifetime.
 
 ## Permissions Needed
 
@@ -131,8 +178,11 @@ kubectl apply -f deploy/install.yaml
 ### Try It Out
 
 ```bash
-# Create an example Pod
+# Create an example Pod (shrink after started, the default)
 kubectl apply -f examples/pod.yaml
+
+# Or create an example Pod (shrink after ready, with 30s delay)
+kubectl apply -f examples/pod-ready-mode.yaml
 
 # Or create an example Deployment
 kubectl apply -f examples/deployment.yaml
@@ -148,25 +198,7 @@ kubectl get pod example-app -o jsonpath='{.metadata.annotations.autosize\.k8s\.i
 # Expected: true
 ```
 
-## Creating a Release
-
-To publish a versioned image:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-This triggers the publish workflow and creates image tags `v0.1.0`, `0.1`, and `sha-<commit>`.
-
-## CI/CD
-
-| Workflow | File | Triggers | Purpose |
-|---|---|---|---|
-| **CI** | `.github/workflows/ci.yml` | Push/PR to `main` | Runs vet, fmt check, and tests |
-| **Publish Image** | `.github/workflows/publish.yml` | Push to `main`, version tags, manual | Builds and pushes multi-arch image to GHCR |
-
-## Example Pod Spec
+## Example: Shrink After Started (default)
 
 ```yaml
 apiVersion: v1
@@ -195,7 +227,58 @@ spec:
           restartPolicy: NotRequired
 ```
 
-The Pod starts with `500m` CPU request (Burstable QoS) and gets shrunk to `50m` after the container has started.
+## Example: Shrink After Ready (with delay)
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-app-ready
+  labels:
+    autosize.k8s.io/shrink-cpu-request: "true"
+  annotations:
+    autosize.k8s.io/final-cpu-request: "100m"
+    autosize.k8s.io/target-container: "app"
+    autosize.k8s.io/shrink-mode: "ready"
+    autosize.k8s.io/startup-delay: "30s"
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["sh", "-c", "echo started && sleep 3600"]
+      readinessProbe:
+        exec:
+          command: ["true"]
+        initialDelaySeconds: 5
+      resources:
+        requests:
+          cpu: 500m
+          memory: 64Mi
+        limits:
+          cpu: "1"
+          memory: 128Mi
+      resizePolicy:
+        - resourceName: cpu
+          restartPolicy: NotRequired
+```
+
+## Creating a Release
+
+To publish a versioned image:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+This triggers the publish workflow and creates image tags `v0.1.0`, `0.1`, and `sha-<commit>`.
+
+## CI/CD
+
+| Workflow | File | Triggers | Purpose |
+|---|---|---|---|
+| **CI** | `.github/workflows/ci.yml` | Push/PR to `main` | Runs vet, fmt check, and tests |
+| **Publish Image** | `.github/workflows/publish.yml` | Push to `main`, version tags, manual | Builds and pushes multi-arch image to GHCR |
 
 ## Project Structure
 
@@ -208,8 +291,9 @@ The Pod starts with `500m` CPU request (Burstable QoS) and gets shrunk to `50m` 
 ├── deploy/
 │   └── install.yaml                     # Namespace, SA, RBAC, Deployment
 ├── examples/
-│   ├── pod.yaml                         # Example opted-in Pod
-│   └── deployment.yaml                  # Example opted-in Deployment
+│   ├── pod.yaml                         # Example: shrink after started
+│   ├── pod-ready-mode.yaml              # Example: shrink after ready
+│   └── deployment.yaml                  # Example: opted-in Deployment
 ├── Dockerfile
 ├── Makefile
 └── README.md

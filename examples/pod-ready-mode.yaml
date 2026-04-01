@@ -1,25 +1,30 @@
-# Example Pod that opts into CPU request shrinking (default: shrink after started).
+# Example Pod that shrinks CPU only after the container is ready.
 #
-# This Pod starts with a generous CPU request (500m) to ensure fast startup,
-# and the controller will shrink it to 50m once the container has started.
+# Useful for workloads where readiness probes must pass before reducing CPU
+# (e.g. JVM warm-up, cache priming).
 #
 # QoS class: Burstable (requests != limits), which allows in-place resize.
 apiVersion: v1
 kind: Pod
 metadata:
-  name: example-app
+  name: example-app-ready
   labels:
     autosize.k8s.io/shrink-cpu-request: "true"
   annotations:
-    autosize.k8s.io/final-cpu-request: "50m"
+    autosize.k8s.io/final-cpu-request: "100m"
     autosize.k8s.io/target-container: "app"
-    # autosize.k8s.io/shrink-mode: "started"   # default, shrink after container started
-    # autosize.k8s.io/startup-delay: "10s"      # optional: wait 10s after trigger
+    autosize.k8s.io/shrink-mode: "ready"
+    autosize.k8s.io/startup-delay: "30s"  # wait 30s after container becomes ready
 spec:
   containers:
     - name: app
       image: busybox
       command: ["sh", "-c", "echo started && sleep 3600"]
+      readinessProbe:
+        exec:
+          command: ["true"]
+        initialDelaySeconds: 5
+        periodSeconds: 5
       resources:
         requests:
           cpu: 500m

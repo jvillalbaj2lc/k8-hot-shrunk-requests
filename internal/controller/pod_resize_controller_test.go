@@ -226,6 +226,12 @@ func TestPodRunningAndStarted_ResizePatched(t *testing.T) {
 	if updated.Annotations[AnnotationShrunk] != "true" {
 		t.Error("expected shrunk annotation to be set")
 	}
+
+	// Verify the CPU request was actually resized to the target value
+	gotCPU := updated.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU]
+	if gotCPU.String() != "50m" {
+		t.Errorf("expected CPU request to be 50m after resize, got %s", gotCPU.String())
+	}
 }
 
 func TestAlreadyProcessed_Ignored(t *testing.T) {

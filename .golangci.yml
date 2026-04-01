@@ -1,0 +1,39 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - misspell
+    - gocritic
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: blank-imports
+        - name: exported
+        - name: var-naming
+        - name: indent-error-flow
+        - name: range
+        - name: error-return
+        - name: error-naming
+        - name: increment-decrement
+        - name: error-strings
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/jvillalbaj2lc/k8-hot-shrunk-requests
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -55,6 +55,10 @@ spec:
         app: cpu-shrink-controller
     spec:
       serviceAccountName: cpu-shrink-controller
+      volumes:
+        - name: config
+          configMap:
+            name: cpu-shrink-config
       containers:
         - name: manager
           # Replace :latest with a specific tag (e.g. :v0.1.0) for production use
@@ -90,3 +94,8 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cpu-shrink/config.yaml
+              subPath: config.yaml
+              readOnly: true

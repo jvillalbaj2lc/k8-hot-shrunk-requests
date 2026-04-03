@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cpu-shrink-config
+  namespace: cpu-shrink-system
+data:
+  config.yaml: |
+    # defaultShrinkMode controls when the CPU request shrink is triggered.
+    # Valid values: "started" (container has started) or "ready" (container is ready).
+    # Pod annotation autosize.k8s.io/shrink-mode overrides this value.
+    defaultShrinkMode: started
+
+    # defaultStartupDelay is the time to wait after the container condition is met
+    # before shrinking. Use Go duration format (e.g. "0s", "30s", "2m").
+    # Pod annotation autosize.k8s.io/startup-delay overrides this value.
+    defaultStartupDelay: 0s
+
+    # allowedNamespaces is a whitelist of namespaces to process.
+    # If set, only pods in these namespaces will be considered.
+    # Mutually exclusive with excludedNamespaces — set ONLY ONE.
+    # allowedNamespaces:
+    #   - prod
+    #   - staging
+
+    # excludedNamespaces is a blacklist of namespaces to skip.
+    # If set, pods in these namespaces will be silently ignored.
+    # Mutually exclusive with allowedNamespaces — set ONLY ONE.
+    # excludedNamespaces:
+    #   - kube-system
+    #   - kube-public
+
+    # excludedPods is a list of specific pods to skip, in "namespace/name" format.
+    excludedPods: []
+    #   - kube-system/coredns-abc123
+
+    # excludedContainers is a list of container names to skip across all pods.
+    excludedContainers: []
+    #   - vault-agent
+    #   - vault-agent-init

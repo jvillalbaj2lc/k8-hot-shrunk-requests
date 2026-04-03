@@ -13,7 +13,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	"github.com/jvillalbaj2lc/k8-hot-shrunk-requests/internal/config"
 )
 
 // Constants for labels and annotations used by the PodResize controller.
@@ -41,22 +42,48 @@ type PodResizeReconciler struct {
 	Client   client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+	Config   *config.ControllerConfig
+}
+
+// effectiveConfig returns the controller config, falling back to defaults if nil.
+func (r *PodResizeReconciler) effectiveConfig() *config.ControllerConfig {
+	if r.Config != nil {
+		return r.Config
+	}
+	return config.DefaultConfig()
 }
 
 // Reconcile processes a single Pod event and performs in-place CPU request shrink if eligible.
 func (r *PodResizeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+	cfg := r.effectiveConfig()
 
 	var pod corev1.Pod
 	if err := r.Client.Get(ctx, req.NamespacedName, &pod); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Namespace filtering — silently skip if pod namespace is not allowed.
+	if len(cfg.AllowedNamespaces) > 0 {
+		if !containsString(cfg.AllowedNamespaces, pod.Namespace) {
+			return ctrl.Result{}, nil
+		}
+	} else if len(cfg.ExcludedNamespaces) > 0 {
+		if containsString(cfg.ExcludedNamespaces, pod.Namespace) {
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// Excluded pods — silently skip if namespace/name is excluded.
+	if containsString(cfg.ExcludedPods, pod.Namespace+"/"+pod.Name) {
+		return ctrl.Result{}, nil
+	}
+
 	if !IsPodEligible(&pod) {
 		return ctrl.Result{}, nil
 	}
 
-	// Validate shrink mode annotation.
+	// Validate shrink mode annotation, applying config default if absent.
 	mode, ok := ResolveShrinkMode(&pod)
 	if !ok {
 		raw := pod.Annotations[AnnotationShrinkMode]
@@ -67,8 +94,11 @@ func (r *PodResizeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				AnnotationShrinkMode, raw, ShrinkModeStarted, ShrinkModeReady))
 		return ctrl.Result{}, nil
 	}
+	if _, exists := pod.Annotations[AnnotationShrinkMode]; !exists {
+		mode = cfg.DefaultShrinkMode
+	}
 
-	// Parse optional startup delay.
+	// Parse optional startup delay, applying config default if absent.
 	delay, delayOK := MaybeParseStartupDelay(&pod)
 	if !delayOK {
 		raw := pod.Annotations[AnnotationStartupDelay]
@@ -77,6 +107,9 @@ func (r *PodResizeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		r.Recorder.Event(&pod, corev1.EventTypeWarning, "InvalidStartupDelay",
 			fmt.Sprintf("annotation %s has invalid value %q", AnnotationStartupDelay, raw))
 		return ctrl.Result{}, nil
+	}
+	if _, exists := pod.Annotations[AnnotationStartupDelay]; !exists {
+		delay = cfg.DefaultStartupDelay
 	}
 
 	// Validate final-cpu-request annotation.
@@ -107,6 +140,11 @@ func (r *PodResizeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	containerName := pod.Spec.Containers[containerIdx].Name
+
+	// Excluded containers — silently skip if container name is excluded.
+	if containsString(cfg.ExcludedContainers, containerName) {
+		return ctrl.Result{}, nil
+	}
 
 	// Check current CPU request and enforce true shrink semantics.
 	currentCPU, hasCPU := GetCurrentCPURequest(&pod, containerIdx)
@@ -197,133 +235,6 @@ func (r *PodResizeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-// --- Helpers ---
-
-// ResolveShrinkMode returns the validated shrink mode and whether it is valid.
-// Defaults to "started" if the annotation is missing.
-func ResolveShrinkMode(pod *corev1.Pod) (string, bool) {
-	raw, exists := pod.Annotations[AnnotationShrinkMode]
-	if !exists || raw == "" {
-		return ShrinkModeStarted, true
-	}
-	switch raw {
-	case ShrinkModeStarted, ShrinkModeReady:
-		return raw, true
-	default:
-		return "", false
-	}
-}
-
-// MaybeParseStartupDelay parses the optional startup-delay annotation.
-// Returns (0, true) if the annotation is absent.
-// Returns (duration, true) if valid.
-// Returns (0, false) if present but invalid.
-func MaybeParseStartupDelay(pod *corev1.Pod) (time.Duration, bool) {
-	raw, exists := pod.Annotations[AnnotationStartupDelay]
-	if !exists || raw == "" {
-		return 0, true
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil || d < 0 {
-		return 0, false
-	}
-	return d, true
-}
-
-// IsContainerStarted returns true if the named container has started == true.
-func IsContainerStarted(pod *corev1.Pod, containerName string) bool {
-	for _, cs := range pod.Status.ContainerStatuses {
-		if cs.Name == containerName {
-			return cs.Started != nil && *cs.Started
-		}
-	}
-	return false
-}
-
-// IsContainerReady returns true if the named container has ready == true.
-func IsContainerReady(pod *corev1.Pod, containerName string) bool {
-	for _, cs := range pod.Status.ContainerStatuses {
-		if cs.Name == containerName {
-			return cs.Ready
-		}
-	}
-	return false
-}
-
-// ShouldShrinkNow checks whether the trigger condition is met for the given mode.
-func ShouldShrinkNow(pod *corev1.Pod, containerName, mode string) bool {
-	switch mode {
-	case ShrinkModeReady:
-		return IsContainerReady(pod, containerName)
-	default: // ShrinkModeStarted
-		return IsContainerStarted(pod, containerName)
-	}
-}
-
-// ContainerConditionAge returns how long ago the container condition was met.
-// For "started" mode it uses the container's started-at time; for "ready" it
-// uses the ContainersReady pod condition transition time.
-// If the time cannot be determined, returns 0 (so the delay is considered not elapsed yet
-// and the controller will requeue until the time becomes resolvable).
-func ContainerConditionAge(pod *corev1.Pod, containerName, mode string) time.Duration {
-	now := time.Now()
-
-	if mode == ShrinkModeReady {
-		for _, cond := range pod.Status.Conditions {
-			if cond.Type == corev1.ContainersReady && cond.Status == corev1.ConditionTrue {
-				return now.Sub(cond.LastTransitionTime.Time)
-			}
-		}
-		return 0
-	}
-
-	// For "started" mode, use the running state start time of the container.
-	for _, cs := range pod.Status.ContainerStatuses {
-		if cs.Name == containerName && cs.State.Running != nil {
-			return now.Sub(cs.State.Running.StartedAt.Time)
-		}
-	}
-	return 0
-}
-
-// GetCurrentCPURequest returns the current CPU request for the container and whether it exists.
-func GetCurrentCPURequest(pod *corev1.Pod, containerIdx int) (resource.Quantity, bool) {
-	reqs := pod.Spec.Containers[containerIdx].Resources.Requests
-	if reqs == nil {
-		return resource.Quantity{}, false
-	}
-	cpu, ok := reqs[corev1.ResourceCPU]
-	return cpu, ok
-}
-
-// ResolveTargetContainer determines which container to resize.
-// If the target-container annotation is set, use that.
-// Otherwise, if there is exactly one non-init, non-ephemeral container, use it.
-func ResolveTargetContainer(pod *corev1.Pod) (int, error) {
-	annotation := pod.Annotations[AnnotationTargetContainer]
-
-	if annotation != "" {
-		for i, c := range pod.Spec.Containers {
-			if c.Name == annotation {
-				return i, nil
-			}
-		}
-		return -1, fmt.Errorf("target container %q not found in pod spec", annotation)
-	}
-
-	if len(pod.Spec.Containers) == 1 {
-		return 0, nil
-	}
-
-	return -1, fmt.Errorf("pod has %d containers and no %s annotation; cannot determine target",
-		len(pod.Spec.Containers), AnnotationTargetContainer)
-}
-
-// IsStartupComplete is kept for backward compatibility with existing tests.
-func IsStartupComplete(pod *corev1.Pod, containerName string) bool {
-	return IsContainerStarted(pod, containerName)
-}
-
 // PatchResize issues a strategic merge patch against the Pod /resize subresource.
 func (r *PodResizeReconciler) PatchResize(ctx context.Context, pod *corev1.Pod, containerIdx int, cpu resource.Quantity) error {
 	patch := client.MergeFrom(pod.DeepCopy())
@@ -363,54 +274,4 @@ func (r *PodResizeReconciler) MarkProcessed(ctx context.Context, pod *corev1.Pod
 	}
 	pod.Annotations[AnnotationShrunk] = "true"
 	return r.Client.Patch(ctx, pod, patch)
-}
-
-// IsPodEligible checks if a Pod should be processed by this controller.
-func IsPodEligible(pod *corev1.Pod) bool {
-	if pod.DeletionTimestamp != nil {
-		return false
-	}
-
-	if pod.Labels[LabelShrinkCPU] != "true" {
-		return false
-	}
-
-	if pod.Annotations[AnnotationShrunk] == "true" {
-		return false
-	}
-
-	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-		return false
-	}
-
-	if pod.Status.Phase != corev1.PodRunning {
-		return false
-	}
-
-	return true
-}
-
-// SetupWithManager registers the controller with the manager.
-func (r *PodResizeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Pod{}).
-		WithEventFilter(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return obj.GetLabels()[LabelShrinkCPU] == "true"
-		})).
-		Named("pod-resize").
-		Complete(r)
-}
-
-// NewPodResizeReconciler creates a reconciler for use in tests or programmatic setup.
-func NewPodResizeReconciler(c client.Client, scheme *runtime.Scheme, recorder record.EventRecorder) *PodResizeReconciler {
-	return &PodResizeReconciler{
-		Client:   c,
-		Scheme:   scheme,
-		Recorder: recorder,
-	}
-}
-
-// ReconcilePodByName is a test helper to build a reconcile request.
-func ReconcilePodByName(ns, name string) ctrl.Request {
-	return ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}
 }

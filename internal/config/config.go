@@ -58,5 +58,11 @@ func (c *ControllerConfig) Validate() error {
 	if len(c.AllowedNamespaces) > 0 && len(c.ExcludedNamespaces) > 0 {
 		return fmt.Errorf("allowedNamespaces and excludedNamespaces are mutually exclusive; set only one")
 	}
+	switch c.DefaultShrinkMode {
+	case "started", "ready":
+		// valid
+	default:
+		return fmt.Errorf("defaultShrinkMode must be %q or %q, got %q", "started", "ready", c.DefaultShrinkMode)
+	}
 	return nil
 }

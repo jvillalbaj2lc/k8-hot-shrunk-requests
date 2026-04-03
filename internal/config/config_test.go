@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,7 +56,7 @@ func TestValidate_ValidConfigs(t *testing.T) {
 		{
 			name: "only excludedNamespaces",
 			cfg: &ControllerConfig{
-				DefaultShrinkMode: "started",
+				DefaultShrinkMode:  "started",
 				ExcludedNamespaces: []string{"kube-system"},
 			},
 		},
@@ -99,8 +100,8 @@ func TestValidate_InvalidConfigs(t *testing.T) {
 				t.Fatal("Validate() expected error, got nil")
 			}
 			if tc.wantMsg != "" {
-				if got := err.Error(); !contains(got, tc.wantMsg) {
-					t.Errorf("error %q should contain %q", got, tc.wantMsg)
+				if !strings.Contains(err.Error(), tc.wantMsg) {
+					t.Errorf("error %q should contain %q", err.Error(), tc.wantMsg)
 				}
 			}
 		})
@@ -224,16 +225,3 @@ func TestLoadConfig_EmptyFile(t *testing.T) {
 	}
 }
 
-// contains is a simple substring check helper for test assertions.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchSubstring(s, substr)
-}
-
-func searchSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

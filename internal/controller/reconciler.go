@@ -233,5 +233,3 @@ func (r *PodResizeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	return ctrl.Result{}, nil
 }
-
-

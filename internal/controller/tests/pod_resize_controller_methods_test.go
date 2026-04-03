@@ -1,4 +1,4 @@
-package controller
+package controllertests
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/jvillalbaj2lc/k8-hot-shrunk-requests/internal/controller"
 )
 
 func TestPatchResize_UpdatesOnlyTargetContainerCPURequest(t *testing.T) {
@@ -24,15 +26,15 @@ func TestPatchResize_UpdatesOnlyTargetContainerCPURequest(t *testing.T) {
 	})
 
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(pod).Build()
-	r := NewPodResizeReconciler(c, s, record.NewFakeRecorder(10))
+	r := controller.NewPodResizeReconciler(c, s, record.NewFakeRecorder(10))
 
 	var fetched corev1.Pod
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "patch-resize"}, &fetched); err != nil {
 		t.Fatalf("failed to fetch pod: %v", err)
 	}
 
-	if err := r.patchResize(context.Background(), &fetched, 1, resource.MustParse("125m")); err != nil {
-		t.Fatalf("patchResize returned error: %v", err)
+	if err := r.PatchResize(context.Background(), &fetched, 1, resource.MustParse("125m")); err != nil {
+		t.Fatalf("PatchResize returned error: %v", err)
 	}
 
 	var updated corev1.Pod
@@ -56,15 +58,15 @@ func TestMarkProcessed_InitializesAnnotationsWhenNil(t *testing.T) {
 	pod.Annotations = nil
 
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(pod).Build()
-	r := NewPodResizeReconciler(c, s, record.NewFakeRecorder(10))
+	r := controller.NewPodResizeReconciler(c, s, record.NewFakeRecorder(10))
 
 	var fetched corev1.Pod
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "mark-processed"}, &fetched); err != nil {
 		t.Fatalf("failed to fetch pod: %v", err)
 	}
 
-	if err := r.markProcessed(context.Background(), &fetched); err != nil {
-		t.Fatalf("markProcessed returned error: %v", err)
+	if err := r.MarkProcessed(context.Background(), &fetched); err != nil {
+		t.Fatalf("MarkProcessed returned error: %v", err)
 	}
 
 	var updated corev1.Pod
@@ -72,13 +74,13 @@ func TestMarkProcessed_InitializesAnnotationsWhenNil(t *testing.T) {
 		t.Fatalf("failed to fetch updated pod: %v", err)
 	}
 
-	if updated.Annotations[AnnotationShrunk] != "true" {
-		t.Fatalf("expected %s annotation to be true", AnnotationShrunk)
+	if updated.Annotations[controller.AnnotationShrunk] != "true" {
+		t.Fatalf("expected %s annotation to be true", controller.AnnotationShrunk)
 	}
 }
 
 func TestReconcilePodByName_BuildsExpectedRequest(t *testing.T) {
-	req := ReconcilePodByName("kube-system", "mypod")
+	req := controller.ReconcilePodByName("kube-system", "mypod")
 	if req.Name != "mypod" {
 		t.Fatalf("unexpected request name: got %q want %q", req.Name, "mypod")
 	}
@@ -92,7 +94,7 @@ func TestIsPodEligible_TerminatingPodIsNotEligible(t *testing.T) {
 	pod := basePod("terminating-eligibility", withLabel, withFinalCPU("50m"), withRunningAndStarted)
 	pod.DeletionTimestamp = &now
 
-	if isPodEligible(pod) {
+	if controller.IsPodEligible(pod) {
 		t.Fatal("expected pod with deletion timestamp to be ineligible")
 	}
 }

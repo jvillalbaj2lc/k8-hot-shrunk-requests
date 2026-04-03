@@ -8,7 +8,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -235,43 +234,4 @@ func (r *PodResizeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-// PatchResize issues a strategic merge patch against the Pod /resize subresource.
-func (r *PodResizeReconciler) PatchResize(ctx context.Context, pod *corev1.Pod, containerIdx int, cpu resource.Quantity) error {
-	patch := client.MergeFrom(pod.DeepCopy())
 
-	if pod.Spec.Containers[containerIdx].Resources.Requests == nil {
-		pod.Spec.Containers[containerIdx].Resources.Requests = corev1.ResourceList{}
-	}
-	pod.Spec.Containers[containerIdx].Resources.Requests[corev1.ResourceCPU] = cpu
-
-	return r.Client.SubResource("resize").Patch(ctx, pod, patch)
-}
-
-// VerifyResize re-reads the Pod and checks that the CPU request matches the expected value.
-func (r *PodResizeReconciler) VerifyResize(ctx context.Context, nn types.NamespacedName, containerIdx int, expectedCPU resource.Quantity) error {
-	var updated corev1.Pod
-	if err := r.Client.Get(ctx, nn, &updated); err != nil {
-		return fmt.Errorf("failed to re-read pod after resize: %w", err)
-	}
-	if containerIdx >= len(updated.Spec.Containers) {
-		return fmt.Errorf("container index %d out of range after re-read", containerIdx)
-	}
-	actual, ok := GetCurrentCPURequest(&updated, containerIdx)
-	if !ok {
-		return fmt.Errorf("CPU request missing after resize patch")
-	}
-	if actual.Cmp(expectedCPU) != 0 {
-		return fmt.Errorf("CPU request after resize is %s, expected %s", actual.String(), expectedCPU.String())
-	}
-	return nil
-}
-
-// MarkProcessed adds the "already shrunk" annotation to the Pod.
-func (r *PodResizeReconciler) MarkProcessed(ctx context.Context, pod *corev1.Pod) error {
-	patch := client.MergeFrom(pod.DeepCopy())
-	if pod.Annotations == nil {
-		pod.Annotations = map[string]string{}
-	}
-	pod.Annotations[AnnotationShrunk] = "true"
-	return r.Client.Patch(ctx, pod, patch)
-}

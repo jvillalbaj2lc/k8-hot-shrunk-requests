@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/jvillalbaj2lc/k8-hot-shrunk-requests/internal/config"
 	"github.com/jvillalbaj2lc/k8-hot-shrunk-requests/internal/controller"
 )
 
@@ -34,6 +35,12 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
 
+	cfg, err := config.LoadConfig("/etc/cpu-shrink/config.yaml")
+	if err != nil {
+		setupLog.Error(err, "unable to load controller config")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
@@ -48,6 +55,7 @@ func main() {
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("cpu-shrink-controller"), //nolint:staticcheck // TODO: migrate to GetEventRecorder (new events API)
+		Config:   cfg,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PodResize")
 		os.Exit(1)
